@@ -1,0 +1,418 @@
+---
+title: "Code for the paper Megaliths of Monte Penide and environs"
+author: "Miguel Carrero, Andrew Bevan, Mark Lake"
+date: "8 February 2019"
+output: html_document
+---
+
+# Setup
+
+```{r echo=FALSE, results='hide'}
+numSims <- 4
+
+spatpack<-c("raster","spatstat","rgdal","maptools")
+lapply(spatpack, require, character.only=TRUE)
+```
+
+The results are based on `r numSims` simulations.
+
+The following libraries were loaded: `r spatpack`.
+
+
+# PART 3 Data and methods
+
+## Load data
+```{r results='hide'} 
+elevation <- raster("grids/dem.tif")
+eucl_dist_wat <- raster("grids/wsheddists.tif")
+studyarea <- readOGR(dsn="shp/studyarea", layer="studyarea")
+sites <- read.table(file="csv/sites.csv",header=TRUE, sep=";")
+area <- as(studyarea,"owin")
+sppp <- ppp(x=sites$x, y=sites$y, window=area)
+
+```
+
+# Part 4 First-Order Location Model
+
+## Summarise univariate relationships 
+
+```{r results='hide'} 
+elev <- as.im(as(elevation,"SpatialGridDataFrame"))
+watersheddist <- as.im(as(eucl_dist_wat,"SpatialGridDataFrame"))
+elev.rh <- rhohat(sppp, elev, confidence=0.95)
+water.rh <- rhohat(sppp, watersheddist, confidence=0.95)
+
+```
+```{r}
+pdf(width=9, height=7, paper="a4r", file="output/fig3cd.pdf")
+par(mfrow=c(1,2))
+par(mar=c(3, 3, 1, 1)) #c(bottom, left, top, right)
+plot(elev.rh, main="", xlab="metres", ylab="", ylim=c(0,2.2e-06), legend=FALSE, cex.axis=0.7)
+legend("topleft", legend="Elevation", cex=0.7, bty='n', text.font=2)
+plot(water.rh, main="", xlab="metres", ylab="", ylim=c(0,2.2e-06), legend=FALSE, cex.axis=0.7)
+legend("topright", legend="Watershed Distance", cex=0.7, bty='n', text.font=2)
+par(mfrow=c(1,1))
+dev.off()
+```
+
+The plot is saved as figs 3c and 3d in the folder 'output'.
+
+## Calculate the first order logistic model
+
+```{r} 
+covlist <- list(elev, watersheddist)
+names(covlist) <- c("elev", "watersheddist")
+fotrend <- ~ elev + watersheddist
+mod1 <- step(ppm(sppp, trend=fotrend, interaction=NULL, covariates=covlist, method="logi"))
+summary(mod1)
+```
+
+```{r}
+pdf(width=9, height=7, paper="a4r", file="output/fig3e.pdf")
+logodds <- -16.379939413+(elev*0.006976940)+(watersheddist*-0.001089358)
+par(mfrow=c(1,1))
+plot(logodds, main="")
+dev.off()
+```
+
+The plotted model is saved as fig3e in the folder 'output'.
+
+# PART 5 Second order clustering
+
+## Random (null) model
+
+Calculate the inhomogeneous pcfunction with a 95% envelope from a
+wholly random Poisson process, *mod0*.
+
+```{r results='hide'}
+mod0 <- ppm(sppp, ~1) #Null model
+Pcfinhom_mod0 <- envelope(mod0, fun=pcfinhom, correction="iso", nsim=numSims)
+```
+```{r echo=FALSE}
+pdf(width=9, height=7, paper="a4r", file="output/fig4a.pdf")
+plot(Pcfinhom_mod0, xlim=c(0,8000),ylim=c(0, 30), legend=FALSE, main="a. Random model")
+dev.off()
+```
+
+The plot is saved in the folder 'output' as fig4a.
+
+## First order model
+
+Calculate the inhomogeneous pcfunction with a 95% envelope conditioned
+by the first order logistic model *mod1*.
+
+```{r results='hide'}
+Pcfinhom_mod1 <- envelope(mod1, fun=pcfinhom, correction="iso", nsim=numSims)
+```
+
+```{r}
+pdf(width=9, height=7, paper="a4r", file="output/fig4b.pdf")
+plot(Pcfinhom_mod1, xlim=c(0,8000),ylim=c(0, 30), legend=FALSE, main="b. First-order model")
+dev.off()
+```
+
+The plot is saved in the folder 'output' as fig4b.
+
+## First and second order (area interaction) model
+
+Calculate the inhomogeneous pcfunction with a 95% envelope conditioned
+by a point process model, *mod2*, which combines the first order
+logistic model and a second order area interaction model.
+
+Note that it can take a long time to run this code with a large number
+of simulations.
+
+```{r results='hide'}
+mod2 <- step(ppm(sppp, trend=fotrend, interaction=AreaInter(1500), covariates=covlist, method="logi"))
+Pcfinhom_mod2 <- envelope(mod2, fun=pcfinhom, correction="iso", nsim=numSims)
+```
+
+```{r}
+pdf(width=9, height=7, paper="a4r", file="output/fig4c.pdf")
+plot(Pcfinhom_mod2, xlim=c(0,8000),ylim=c(0, 30),legend=FALSE, main="c. First and second-order model")
+dev.off()
+```
+   
+The plot is saved in the folder 'output' as fig4c.
+   
+## Compare models
+
+We can check the AIC's for the models.
+
+	Model                          | AIC
+	-------------------------------|--------------
+	Null (mod0)                    | `r AIC(mod0)`
+	First-order (mod1)             | `r AIC(mod1)`
+	First and second order (mod2)  | `r AIC(mod2)`
+
+
+# PART 6 Mound size and shape
+
+## Correlation analysis between site distance and volume
+
+Calculate the mark correlation function to explore the spatial
+clustering of mounds by volume. 
+
+```{r results='hide', warning=FALSE}
+
+area <- as(studyarea,"owin")
+points <- ppp(x=sites$x,y=sites$y, marks=sites$volume, window= area)
+mcorr1 <- envelope (points, markcorr, nsim=numSims)
+pdf(width=9, height=7, paper="a4r", file="output/fig5.pdf")
+plot(mcorr1, main="mark correlation function", legend=FALSE)
+dev.off()
+```
+
+The plot is saved in the folder 'output' as fig5.
+
+## Hierarchical distribution of mound sizes
+
+Here we calculate the mean and/sum of ranks in each level if we
+hierarchically allocate tombs to each level.  In other words, the
+biggest tomb in each of groups 1-9 is placed in level 1, then the
+second biggest tomb in each of groups 1 to 9 is placed in level 2, and
+so on.  We can then compare mean and/or sum of ranks in each level
+with what we would get if we simply allocate tombs to levels by rank
+with no reference to their group.  Since not all groups are equally
+represented, we adjust the expectation accordingly, i.e. the 'levels'
+will not have equal numbers of members.
+
+### Functions for analysis
+
+#### A function to calculate the ranks for each group.
+
+```{r}
+partition.ranks.by.group <- function(group.ids, tombs, shuffle=FALSE) {
+    group.ranks <- list()
+    if (shuffle) {
+        rankvol <- sample(tombs$rankvol)
+    }
+    else
+    {
+        rankvol <- tombs$rankvol
+    }    
+    for (g in group.ids) {
+        group.ranks[[g+1]] <- rankvol[which(tombs$group %in% c(g))]
+    }
+    return(group.ranks)
+}
+```
+
+#### A function to allocate ranks to levels according to group membership
+		
+This iterates over groups allocating ranks to each level.  Once a
+group is exhausted (i.e. there are no more tombs) we simply skip that
+group.  In this case we store the ranks in one list per level because
+we are actually interested in aggregate properties of ranks per level,
+i.e. we regard [1, 2, 3][4, 5, 6] and [2, 1, 3][6, 5, 4] as matches in
+the sense that they would have the same sum and/or mean.
+
+```{r}
+allocate.ranks.to.levels.by.group <- function (groups, group.ranks, max.tombs.per.group) {
+    ranks.in.levels <- list()
+    level <- 1
+    while (level <=  max.tombs.per.group) {
+        tmp.ranks <- rep(NA, length(groups$gis))
+        i <-  1
+        for (g in groups$gid) {
+            if (groups$ntombs[g+1] >= level) {
+                                        # So there is at least one
+                                        # tomb left in this group
+                tmp.ranks[i] <- group.ranks[[g+1]][level]
+                i <-  i + 1
+            }
+        }
+        ranks.in.levels[[level]] <- tmp.ranks
+        level <- level+1
+    }
+    return (ranks.in.levels)
+}
+```	
+
+#### A function to allocate ranks *ignoring* group membership
+
+```{r}
+allocate.ranks.to.levels.ignoring.group <- function(ranks.per.level.by.group, tombs, max.tombs.per.group) {
+    ranks.in.levels <- list()
+    level <- 1
+    total.allocated <- 0
+    global.rank <- 0
+    while (level <= max.tombs.per.group) {
+        tmp.ranks <- rep(NA, ngroups)
+                                        # How many to allocate at this level
+                                        # to match expected
+        n.to.allocate <- length (ranks.per.level.by.group[[level]][which (! is.na(ranks.per.level.by.group[[level]]))])
+        total.allocated <- total.allocated + n.to.allocate
+        i <- 1
+        while (i <= n.to.allocate) {
+            global.rank <- global.rank + 1
+            tmp.ranks[i] <- tombs$rank[global.rank]
+            i <- i + 1
+        }
+        ranks.in.levels[[level]] <- tmp.ranks
+        level <- level+1
+    }
+    return (ranks.in.levels)
+}
+```
+
+#### Functions to compute the sum and mean rank at each level
+
+```{r}
+sum.ranks.by.level <- function (ranks.by.level, nlevels) {
+    ranks.sums <- rep(1, nlevels, NA)
+    level <- 1
+    for (level in seq(1, nlevels, 1)) {
+        ranks.sums[level] <- sum (ranks.by.level[[level]], na.rm=T)
+    }
+    return (ranks.sums)
+}
+
+mean.ranks.by.level <- function (ranks.by.level, nlevels) {
+    ranks.means <- rep(1, nlevels, NA)
+    level <- 1
+    for (level in seq(1, nlevels, 1)) {
+        ranks.means[level] <- mean (ranks.by.level[[level]], na.rm=T)
+    }
+    return (ranks.means)
+}
+```
+
+### Load the data and get basic information
+
+Load the data and drop tombs with volume = zero
+
+```{r results='hide'}
+tombs <- sites[which(sites$volume!=0),]
+```
+
+Obtain information about the number of groups and the number of
+tombs per group.
+
+```{r results='hide'}
+ntombs <- length(tombs$id)
+
+groups.id <- sort(unique(tombs$group))
+ngroups <- length(groups.id)
+groups.hist <- hist(tombs$group, breaks=seq(min(groups.id)-0.5, max(groups.id)+0.5, 1), plot=FALSE)
+
+groups <- data.frame("gid"=groups.id, "ntombs"=groups.hist$count)
+groups$min.vol <- sapply(groups.id, function(x) min(tombs$volume[which(tombs$group %in% c(x))]))
+groups$mean.vol <- sapply(groups.id, function(x) mean(tombs$volume[which(tombs$group %in% c(x))]))
+groups$med.vol <- sapply(groups.id, function(x) median(tombs$volume[which(tombs$group %in% c(x))]))
+groups$max.vol <- sapply(groups.id, function(x) max(tombs$volume[which(tombs$group %in% c(x))]))
+max.tombs.per.group <- max(groups$ntombs)
+```
+
+There are `r ntombs` tombs distributed acrosss  `r ngroups` groups, which
+have the following characteristics in terms of tomb numbers and volumes:
+
+```{r echo=FALSE}
+groups
+```
+
+We see that groups 1, 3, 4, 5, 6, and 8 have means of similar order of
+magnitude.  Groups 0, 2 and 7 are outliers, but also have fewer than 4
+tombs.  There may be grounds to omit 0, 2 and 7 from analysis of
+hierarchy, but we have not done so.
+
+
+### Do the analysis
+
+First, prepare the volume ranks (in descending order) and find the ranks in each group.
+
+```{r results='hide'}
+tombs$rankvol <- rank(-tombs$volume)
+ranks.by.group <- partition.ranks.by.group(groups$gid, tombs, FALSE)
+```
+
+Now consider the observed situation.  We allocate the top rank in each
+group to level 1, then the second rank in each group to level 2, and
+so on.
+
+```{r results='hide'}
+observed.ranks.per.level <- allocate.ranks.to.levels.by.group (groups, ranks.by.group, max.tombs.per.group)
+```
+
+Next, consider the ideal situation.  In other words, we allocate the
+top $N_1$ ranks to level 1, where $N$ is the number of groups which
+contribute to that level.  We then allocate the next $N$ ranks to
+level 2, where $N_2$ is the number of groups which contribute to that
+level, and so on.
+
+```{r results='hide'}
+ideal.ranks.per.level <- allocate.ranks.to.levels.ignoring.group (observed.ranks.per.level, tombs, max.tombs.per.group) 
+```
+
+Now collate some summary information.  Specifically, the sum of ranks
+and mean rank at each level under the two scenarios.
+
+```{r results='hide'}
+resultsB <- data.frame("level"=seq(1, max.tombs.per.group, 1))
+resultsB$observed.sums <- sum.ranks.by.level (observed.ranks.per.level, max.tombs.per.group)
+resultsB$observed.means <- mean.ranks.by.level (observed.ranks.per.level, max.tombs.per.group)
+resultsB$ideal.sums <- sum.ranks.by.level (ideal.ranks.per.level, max.tombs.per.group)
+resultsB$ideal.means <- mean.ranks.by.level (ideal.ranks.per.level, max.tombs.per.group)
+```
+
+```{r echo=FALSE}
+resultsB
+```
+
+What we see here is that the ideal mean ranks increase from one level
+to the next whereas that is not always true of the observed means.  We
+also see that the level 1 and 2 ideal mean ranks are substantially
+smaller than their observed equivalents.
+
+We learn from this that the allocation of tomb volumes across groups
+is not *perfectly* hierarchical.  However, it is still worth
+considering whether the observed distribution of mean ranks per level
+is closer to the ideal distribution than might be expected by chance.
+We can examine this by re-labelling (randomly shuffling the tomb
+volumes) and re-running the allocation of ranks to levels by group.
+
+```{r results='hide'}
+resultsB.sim.sums <- data.frame("level"=seq(1, max.tombs.per.group, 1))
+resultsB.sim.means <- data.frame("level"=seq(1, max.tombs.per.group, 1))
+nsims <- 999
+for (sim in seq(1, nsims, 1)) {
+    sim.ranks.by.group <- partition.ranks.by.group(groups$gid, tombs, TRUE)
+    sim.ranks.per.level <- allocate.ranks.to.levels.by.group (groups, sim.ranks.by.group, max.tombs.per.group)
+    command <- paste ("resultsB.sim.sums$s", sim, " <- sum.ranks.by.level(sim.ranks.per.level, max.tombs.per.group)", sep="")
+    eval(parse(text=command))
+    command <- paste ("resultsB.sim.means$s", sim, " <- mean.ranks.by.level (sim.ranks.per.level, max.tombs.per.group)", sep="")
+    eval(parse(text=command))
+}
+```
+
+We can now find out how the observed mean ranks at each level compare
+to the simulated mean ranks at each level.  One way to do this is to
+compute the rank of the observed mean ranks among the simulated mean
+ranks.
+
+```{r results='hide'}
+nlevels <- length(resultsB.sim.means$s1)
+tmp.rank.observed <- rep(NA, nlevels)
+tmp.min.rank.sims <- rep(NA, nlevels)
+tmp.pval <- rep(NA, nlevels)
+for (level in seq(1, nlevels, 1)) {
+    tmp.rank.observed[level] <- rank(c(resultsB$observed.means[level], as.numeric(resultsB.sim.means[level, 2:(nsims+1)])))[1]
+    tmp.pval[level] <- tmp.rank.observed[level] / (nsims + 1)
+    tmp.min.rank.sims[level] <- min(as.numeric(resultsB.sim.means[level, 2:(nsims+1)]))
+}
+resultsB$observed.rank.among.sims <- tmp.rank.observed
+resultsB$pval <- tmp.pval
+resultsB$min.rank.among.sims <- tmp.min.rank.sims
+rm(tmp.rank.observed, tmp.min.rank.sims, tmp.pval)
+```
+
+```{r echo=FALSE}
+resultsB[,c(1,6,7)]
+```
+
+This is an interesting result.  The first two hierarchical levels are
+significant at $p <= 0.05$, and 3 out of the the first 4 are significant
+at $p <= 0.05$.  The largest tombs are distributed across the groups in
+a way that is broadly (even if not perfectly) hierarchical to an
+extent that is unlikely to occur by chance alone.
+
